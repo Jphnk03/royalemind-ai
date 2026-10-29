@@ -3,3 +3,6 @@ __pycache__/
 *.py[cod]
 royalemind-q.json
 *.tmp
+
+# Private local coaching uploads and match history
+coach_data/
