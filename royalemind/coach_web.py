@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from .coach import add_match, connect, history, progress
 from .challenge import challenge_summary, analyze_decision
+from .replay_ai import analyze_video
 
 STATIC = Path(__file__).resolve().parent.parent/'coach_static'
 LIMIT = 100*1024*1024 + 65536
@@ -46,6 +47,18 @@ def handler(db_path, uploads):
                         return self.send_bytes(200,file.read_bytes(),mime)
             return self.send_json(404,{'error':'Not found'})
         def do_POST(self):
+            if urlsplit(self.path).path.startswith('/api/analyze/'):
+                mid=urlsplit(self.path).path.rsplit('/',1)[-1]
+                with connect(db_path) as db:
+                    row=db.execute('SELECT video_file FROM matches WHERE id=?',(mid,)).fetchone()
+                if not row or not row['video_file']:
+                    return self.send_json(404,{'error':'Replay video not found'})
+                try:
+                    report=analyze_video(Path(uploads)/row['video_file'])
+                    return self.send_json(200,report)
+                except Exception as exc:
+                    self.log_error('Replay analysis failed: %s',type(exc).__name__)
+                    return self.send_json(503,{'error':'Replay analysis unavailable. Check API key, ffmpeg and server logs.'})
             if urlsplit(self.path).path=='/api/decision':
                 try:
                     size=int(self.headers.get('Content-Length','0'))
