@@ -2,19 +2,26 @@
 import json
 from pathlib import Path
 from random import Random
-from .core import Action, Battle
+from .core import Action, Battle, LENGTH
 from .strategy import StrategyAgent
 
 ACTIONS = (None,) + tuple(Action(card, lane) for card in ('scout', 'guard', 'archer') for lane in (0, 1))
-FORMAT = 'royalemind-tabular-q-v1'
+FORMAT = 'royalemind-tabular-q-v2'
+TEACHER = StrategyAgent()
 
 def encode_state(battle, player):
-    def pressure(owner, lane):
-        return min(2, sum(u.owner == owner and u.lane == lane for u in battle.units))
-    return (min(3, battle.elixir[player] // 3),
-            *(pressure(player, lane) for lane in (0, 1)),
-            *(pressure(1-player, lane) for lane in (0, 1)),
-            int(battle.towers[player] < battle.towers[1-player]))
+    """Player-relative elixir, lane counts, advance, towers, and time."""
+    state = [min(5, battle.elixir[player] // 2)]
+    for owner in (player, 1-player):
+        for lane in (0, 1):
+            units = [u for u in battle.units if u.owner == owner and u.lane == lane]
+            state.append(min(3, len(units)))
+            advance = [u.pos if owner == 0 else LENGTH-u.pos for u in units]
+            state.append(max((min(3, pos // 4) for pos in advance), default=0))
+    state.extend((min(4, battle.towers[player] // 250),
+                  min(4, battle.towers[1-player] // 250),
+                  min(3, (battle.duration-battle.time) * 4 // battle.duration)))
+    return tuple(state)
 
 def action_id(action):
     return ACTIONS.index(action)
@@ -32,36 +39,47 @@ class QAgent:
         state = encode_state(battle, player)
         if self.rng.random() < self.epsilon:
             return self.rng.choice(options)
-        values = self.table.get(state, [0.0] * len(ACTIONS))
+        if state not in self.table:
+            return TEACHER.choose(battle, player)
+        values = self.table[state]
         return max(options, key=lambda a: (values[action_id(a)], -action_id(a)))
 
-def train(episodes=1000, seed=42, duration=180, alpha=0.2, gamma=0.95):
+def _new_row(teacher_action):
+    values = [0.0] * len(ACTIONS)
+    values[action_id(teacher_action)] = 2.0
+    return values
+
+def train(episodes=1000, seed=42, duration=180, alpha=0.15, gamma=0.90):
     if episodes < 1 or duration < 1 or not 0 < alpha <= 1 or not 0 <= gamma <= 1:
         raise ValueError('invalid training configuration')
     table = {}
     agent = QAgent(table, seed=seed+100000)
-    opponent = StrategyAgent()
     for episode in range(episodes):
         battle = Battle(seed=seed+episode, duration=duration)
         player = episode % 2
-        agent.epsilon = max(0.05, 0.8 * (1 - episode / episodes))
+        agent.epsilon = max(0.03, 0.30 * (1 - episode / episodes))
         while not battle.done:
             state = encode_state(battle, player)
+            teacher_action = TEACHER.choose(battle, player)
+            row = table.setdefault(state, _new_row(teacher_action))
             action = agent.choose(battle, player)
-            before = (battle.towers[player], battle.towers[1-player])
-            other = opponent.choose(battle, 1-player)
+            before_towers = tuple(battle.towers)
+            other = TEACHER.choose(battle, 1-player)
             battle.step((action, other) if player == 0 else (other, action))
-            reward = ((before[1] - battle.towers[1-player]) -
-                      (before[0] - battle.towers[player])) / 100.0
+            damage = ((before_towers[1-player] - battle.towers[1-player]) -
+                      (before_towers[player] - battle.towers[player])) / 40.0
+            reward = damage + (0.6 if action == teacher_action else -0.25)
             if battle.done:
-                reward += 10.0 if battle.winner == player else (-10.0 if battle.winner is not None else 0.0)
-            row = table.setdefault(state, [0.0] * len(ACTIONS))
-            index = action_id(action)
+                reward += (15 if battle.winner == player else
+                           -15 if battle.winner is not None else 0)
             if battle.done:
                 future = 0.0
             else:
-                following = table.get(encode_state(battle, player), [0.0] * len(ACTIONS))
-                future = max(following[action_id(a)] for a in [None] + battle.legal_actions(player))
+                next_state = encode_state(battle, player)
+                next_teacher = TEACHER.choose(battle, player)
+                next_row = table.setdefault(next_state, _new_row(next_teacher))
+                future = max(next_row[action_id(a)] for a in [None] + battle.legal_actions(player))
+            index = action_id(action)
             row[index] += alpha * (reward + gamma * future - row[index])
     return table
 
@@ -73,14 +91,14 @@ def save_model(table, path):
 def load_model(path):
     data = json.loads(Path(path).read_text(encoding='utf-8'))
     if not isinstance(data, dict) or data.get('format') != FORMAT or data.get('actions') != len(ACTIONS):
-        raise ValueError('unsupported model format')
+        raise ValueError('unsupported model format (v0.3 models must be retrained)')
     rows = data.get('q')
     if not isinstance(rows, list):
         raise ValueError('invalid model rows')
     table = {}
     for row in rows:
         state, values = row['state'], row['values']
-        if (not isinstance(state, list) or len(state) != 6 or
+        if (not isinstance(state, list) or len(state) != 12 or
             not all(type(x) is int for x in state) or
             not isinstance(values, list) or len(values) != len(ACTIONS) or
             not all(type(x) in (int, float) and abs(x) < 1e12 for x in values)):
@@ -102,7 +120,7 @@ def evaluate(table, matches=200, seed=100000, duration=180):
         opponent = StrategyAgent()
         while not battle.done:
             action = learner.choose(battle, player)
-            other = opponent.choose(battle, 1-player)
+            other = TEACHER.choose(battle, 1-player)
             battle.step((action, other) if player == 0 else (other, action))
         key = 'draws' if battle.winner is None else ('learned' if battle.winner == player else 'strategy')
         counts[key] += 1
