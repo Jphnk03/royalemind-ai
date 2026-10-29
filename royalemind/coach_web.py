@@ -1,5 +1,7 @@
 """Single-user localhost web server; no external services or automatic video analysis."""
 import cgi
+import base64
+import hmac
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,18 +16,38 @@ LIMIT = 100*1024*1024 + 65536
 
 def handler(db_path, uploads):
     class Handler(BaseHTTPRequestHandler):
+        def authenticate(self):
+            secret=os.environ.get('ROYALEMIND_ACCESS_PASSWORD','')
+            if not secret:
+                if os.environ.get('ROYALEMIND_PUBLIC')=='1':
+                    self.send_json(503,{'error':'Private access password not configured'})
+                    return False
+                return True
+            header=self.headers.get('Authorization','')
+            expected='Basic '+base64.b64encode(('coach:'+secret).encode()).decode()
+            if not hmac.compare_digest(header,expected):
+                self.send_response(401)
+                self.send_header('WWW-Authenticate','Basic realm="RoyaleMind Private Pilot"')
+                self.send_header('Cache-Control','no-store')
+                self.send_header('Content-Length','0')
+                self.end_headers()
+                return False
+            return True
         def send_bytes(self, status, body, mime='application/json'):
             self.send_response(status)
             self.send_header('Content-Type',mime)
             self.send_header('Content-Length',str(len(body)))
             self.send_header('Cache-Control','no-store')
             self.send_header('X-Content-Type-Options','nosniff')
+            self.send_header('Referrer-Policy','no-referrer')
+            self.send_header('X-Frame-Options','DENY')
             self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; media-src 'self'")
             self.end_headers()
             self.wfile.write(body)
         def send_json(self, status, value):
             self.send_bytes(status,json.dumps(value).encode())
         def do_GET(self):
+            if not self.authenticate(): return
             path=urlsplit(self.path).path
             assets={'/':('index.html','text/html; charset=utf-8'),
                     '/style.css':('style.css','text/css; charset=utf-8'),
@@ -47,6 +69,7 @@ def handler(db_path, uploads):
                         return self.send_bytes(200,file.read_bytes(),mime)
             return self.send_json(404,{'error':'Not found'})
         def do_POST(self):
+            if not self.authenticate(): return
             if urlsplit(self.path).path.startswith('/api/analyze/'):
                 mid=urlsplit(self.path).path.rsplit('/',1)[-1]
                 with connect(db_path) as db:
@@ -99,8 +122,9 @@ def main():
     db_path=directory/'coach.sqlite3'
     with connect(db_path): pass
     port=int(os.environ.get('PORT','8765'))
-    server=ThreadingHTTPServer(('127.0.0.1',port),handler(db_path,directory/'uploads'))
-    print(f'RoyaleMind Coach at http://127.0.0.1:{port} (local only)')
+    public=os.environ.get('ROYALEMIND_PUBLIC')=='1'
+    server=ThreadingHTTPServer(('0.0.0.0' if public else '127.0.0.1',port),handler(db_path,directory/'uploads'))
+    print(f'RoyaleMind Coach listening on port {port} (public binding: {public})')
     try: server.serve_forever()
     except KeyboardInterrupt: server.server_close()
 
