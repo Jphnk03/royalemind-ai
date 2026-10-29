@@ -45,3 +45,16 @@ python -m pytest -q
 ## Future reinforcement learning
 
 An RL policy can call `observe(player)`, choose an `Action` from `legal_actions(player)` (or pass), then call `step((action0, action1))`. Add observation encoding, reward functions, action masks and separate seeded policy RNGs before training. This toy simulator is intentionally not a faithful implementation of Clash Royale.
+
+## v0.2 strategy agent and tournament
+
+`StrategyAgent` is a deterministic **heuristic** policy (not reinforcement learning). It evaluates friendly lane support, nearby enemy pressure, troop strength and available elixir, while leaving the v0.1 battle rules unchanged.
+
+Run a reproducible tournament with 1,000 matches, split evenly between RandomAgent and RushAgent, alternating sides within each matchup:
+
+```bash
+python -m royalemind.tournament --matches 1000 --seed 42 --duration 180
+python -m pytest -q
+```
+
+The tournament reports wins, losses, and draws per opponent. Results are from the simplified simulator and do not measure performance against human Clash Royale players.
