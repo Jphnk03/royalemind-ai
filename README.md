@@ -58,3 +58,21 @@ python -m pytest -q
 ```
 
 The tournament reports wins, losses, and draws per opponent. Results are from the simplified simulator and do not measure performance against human Clash Royale players.
+
+## v0.3 reinforcement learning
+
+The new `QAgent` uses **tabular Q-learning**, with a compact player-relative state encoding, epsilon-greedy exploration, terminal win/loss rewards, and tower-damage shaping. It trains against the existing `StrategyAgent` while leaving `core.py` and all battle rules unchanged. No extra runtime packages are required.
+
+Train, save a JSON model, reload it, and evaluate against StrategyAgent on separate seeds with alternating sides:
+
+```bash
+python -m royalemind.train --episodes 1000 --matches 200 --seed 42 --model royalemind-q.json
+```
+
+Evaluate an existing saved model:
+
+```bash
+python -m royalemind.train --evaluate-only --matches 200 --seed 42 --model royalemind-q.json
+```
+
+Run tests: `python -m pytest -q`. The model file is gitignored because it is a generated training artifact. This is a small, interpretable learning baseline, not a neural network. Evaluation is against a scripted agent in a toy simulator; results do not imply performance in live Clash Royale.
