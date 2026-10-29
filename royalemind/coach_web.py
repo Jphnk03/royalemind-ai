@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 from .coach import add_match, connect, history, progress
+from .challenge import challenge_summary, analyze_decision
 
 STATIC = Path(__file__).resolve().parent.parent/'coach_static'
 LIMIT = 100*1024*1024 + 65536
@@ -31,9 +32,9 @@ def handler(db_path, uploads):
             if path in assets:
                 name,mime=assets[path]
                 return self.send_bytes(200,(STATIC/name).read_bytes(),mime)
-            if path in ('/api/matches','/api/progress'):
+            if path in ('/api/matches','/api/progress','/api/challenge'):
                 with connect(db_path) as db:
-                    return self.send_json(200,history(db) if path.endswith('matches') else progress(db))
+                    return self.send_json(200,history(db) if path.endswith('matches') else challenge_summary(history(db)) if path.endswith('challenge') else progress(db))
             if path.startswith('/api/video/'):
                 mid=path.split('/')[-1]
                 with connect(db_path) as db:
@@ -45,6 +46,15 @@ def handler(db_path, uploads):
                         return self.send_bytes(200,file.read_bytes(),mime)
             return self.send_json(404,{'error':'Not found'})
         def do_POST(self):
+            if urlsplit(self.path).path=='/api/decision':
+                try:
+                    size=int(self.headers.get('Content-Length','0'))
+                    if not 0<size<=4096: return self.send_json(413,{'error':'Invalid request size'})
+                    if self.headers.get_content_type()!='application/json': return self.send_json(415,{'error':'Expected JSON'})
+                    data=json.loads(self.rfile.read(size))
+                    return self.send_json(200,analyze_decision(data['own'],data['enemy'],data['cost'],data['context']))
+                except (ValueError,TypeError,KeyError,AttributeError) as exc:
+                    return self.send_json(400,{'error':str(exc)})
             if urlsplit(self.path).path!='/api/matches':
                 return self.send_json(404,{'error':'Not found'})
             try:
