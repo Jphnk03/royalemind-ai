@@ -89,3 +89,15 @@ python -m royalemind.train --episodes 1000 --matches 200 --seed 42
 ```
 
 Local evaluation with seed 42 and 180 ticks after 1,000 training episodes: learned agent 100 wins, StrategyAgent 100 wins, 0 draws (200 matches). This is **50%**, not a demonstrated improvement over the teacher, and further evaluation is needed.
+
+### Side-aware multi-seed benchmark
+
+Train a model, then benchmark on three held-out seeds against StrategyAgent, RandomAgent, and RushAgent, plus a StrategyAgent self-play control:
+
+```bash
+python -m royalemind.train --episodes 1000 --matches 200 --seed 42
+python -m royalemind.benchmark --model royalemind-q.json --matches 200 --seeds 200000 300000 400000
+python -m pytest -q
+```
+
+Local results from 600 matches per opponent: vs StrategyAgent **300 wins / 300 losses**; vs RandomAgent **511 wins / 88 losses / 1 draw**; vs RushAgent **600 wins / 0 losses**. The StrategyAgent self-play control also finished 300/300, with **player 1 winning every match**. Against StrategyAgent, the learner won only as player 1, revealing a strong simulator side bias. Therefore, **50% is not evidence of improved learning**. The battle engine remains unchanged. The benchmark prints per-side breakdowns to prevent misleading aggregate comparisons.
