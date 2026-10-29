@@ -14,7 +14,7 @@ def test_action_encoding_and_relative_state():
     battle = Battle()
     assert action_id(None) == 0
     assert action_id(Action('archer', 1)) == 6
-    assert len(encode_state(battle, 0)) == 6
+    assert len(encode_state(battle, 0)) == 12
     assert encode_state(battle, 0) == encode_state(battle, 1)
 
 def test_training_reproducible():
@@ -25,7 +25,7 @@ def test_model_roundtrip(tmp_path):
     path = tmp_path / 'model.json'
     save_model(table, path)
     assert load_model(path) == table
-    assert json.loads(path.read_text())['format'] == 'royalemind-tabular-q-v1'
+    assert json.loads(path.read_text())['format'] == 'royalemind-tabular-q-v2'
 
 def test_invalid_model_rejected(tmp_path):
     path = tmp_path / 'bad.json'
@@ -46,3 +46,21 @@ def test_invalid_configuration():
         evaluate({}, matches=0)
     with pytest.raises(ValueError):
         QAgent(epsilon=1.1)
+
+def test_unseen_state_uses_strategy_teacher():
+    from royalemind.strategy import StrategyAgent
+    battle = Battle(seed=12)
+    assert QAgent({}).choose(battle, 0) == StrategyAgent().choose(battle, 0)
+
+def test_state_tracks_enemy_advance():
+    from royalemind.core import Unit
+    battle = Battle()
+    initial = encode_state(battle, 0)
+    battle.units.append(Unit(1, 'scout', 0, 10, 60, 0))
+    assert encode_state(battle, 0) != initial
+
+def test_old_model_version_rejected(tmp_path):
+    path = tmp_path / 'old.json'
+    path.write_text(json.dumps({'format': 'royalemind-tabular-q-v1', 'actions': 7, 'q': []}))
+    with pytest.raises(ValueError):
+        load_model(path)
