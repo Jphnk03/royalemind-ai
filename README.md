@@ -76,3 +76,16 @@ python -m royalemind.train --evaluate-only --matches 200 --seed 42 --model royal
 ```
 
 Run tests: `python -m pytest -q`. The model file is gitignored because it is a generated training artifact. This is a small, interpretable learning baseline, not a neural network. Evaluation is against a scripted agent in a toy simulator; results do not imply performance in live Clash Royale.
+
+## v0.3.1 learning repair
+
+The Q-learning agent now observes relative lane counts and advance, elixir, tower health, and remaining time. Training uses StrategyAgent as a **teacher prior** (imitation-shaped rewards and initial action values) with exploratory Q-learning updates; unseen states fall back to StrategyAgent. This is a hybrid learner, **not an independently learned policy**, so compare against the teacher carefully.
+
+The saved JSON format is now `royalemind-tabular-q-v2`. Old v0.3 models are incompatible; retrain them. No battle rules have changed.
+
+```bash
+python -m pytest -q
+python -m royalemind.train --episodes 1000 --matches 200 --seed 42
+```
+
+Local evaluation with seed 42 and 180 ticks after 1,000 training episodes: learned agent 100 wins, StrategyAgent 100 wins, 0 draws (200 matches). This is **50%**, not a demonstrated improvement over the teacher, and further evaluation is needed.
