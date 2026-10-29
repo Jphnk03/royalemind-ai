@@ -33,7 +33,7 @@ def prepare_replay(video, filename):
         for crf in (30, 35, 39):
             command = ['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error',
                        '-y', '-i', str(source), '-t', '1800', '-vf',
-                       'scale=trunc(min(1280\\,iw)/2)*2:trunc(min(720\\,ih)/2)*2:force_original_aspect_ratio=decrease',
+                       'scale=1280:720:force_original_aspect_ratio=decrease:force_divisible_by=2',
                        '-r', '24', '-an', '-c:v', 'libx264', '-preset', 'veryfast',
                        '-crf', str(crf), '-movflags', '+faststart', str(target)]
             try:
