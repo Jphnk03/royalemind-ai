@@ -4,6 +4,8 @@ import base64
 import hmac
 import json
 import os
+import subprocess
+import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -12,7 +14,36 @@ from .challenge import challenge_summary, analyze_decision
 from .replay_ai import analyze_video
 
 STATIC = Path(__file__).resolve().parent.parent/'coach_static'
-LIMIT = 100*1024*1024 + 65536
+VIDEO_LIMIT = 100*1024*1024
+UPLOAD_LIMIT = 250*1024*1024
+LIMIT = UPLOAD_LIMIT + 65536
+
+def prepare_replay(video, filename):
+    """Compress oversized recordings to MP4 without retaining uncompressed copies."""
+    if len(video) <= VIDEO_LIMIT:
+        return video, filename
+    suffix = Path(filename.replace('\\\\', '/')).suffix.lower()
+    if suffix not in ('.mp4', '.mov', '.webm'):
+        raise ValueError('Video must be MP4, MOV or WebM')
+    with tempfile.TemporaryDirectory(prefix='royalemind-replay-') as folder:
+        source = Path(folder) / ('input' + suffix)
+        target = Path(folder) / 'compressed.mp4'
+        source.write_bytes(video)
+        # 720p, 24fps, H.264. Re-encode more aggressively on large recordings.
+        for crf in (30, 35, 39):
+            command = ['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error',
+                       '-y', '-i', str(source), '-t', '1800', '-vf',
+                       'scale=1280:720:force_original_aspect_ratio=decrease:force_divisible_by=2',
+                       '-r', '24', '-an', '-c:v', 'libx264', '-preset', 'veryfast',
+                       '-crf', str(crf), '-movflags', '+faststart', str(target)]
+            try:
+                subprocess.run(command, check=True, timeout=150, capture_output=True)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+                raise ValueError('Video compression failed; try a shorter replay') from exc
+            if target.stat().st_size <= VIDEO_LIMIT:
+                return target.read_bytes(), 'replay.mp4'
+        raise ValueError('Replay is still too large after compression; trim the recording')
+
 
 def handler(db_path, uploads):
     class Handler(BaseHTTPRequestHandler):
@@ -96,7 +127,7 @@ def handler(db_path, uploads):
             try:
                 size=int(self.headers.get('Content-Length','0'))
                 if not 0<size<=LIMIT:
-                    return self.send_json(413,{'error':'Upload exceeds 100 MB limit'})
+                    return self.send_json(413,{'error':'Upload exceeds 250 MB limit'})
                 if self.headers.get_content_type()!='multipart/form-data':
                     return self.send_json(415,{'error':'Expected multipart upload'})
                 form=cgi.FieldStorage(fp=self.rfile,headers=self.headers,
@@ -106,11 +137,16 @@ def handler(db_path, uploads):
                     item=form[name] if name in form else None
                     return item.value if item is not None and not isinstance(item,list) and item.filename is None else ''
                 video_field=form['video'] if 'video' in form else None
-                video=video_field.file.read(100*1024*1024+1) if video_field is not None and video_field.filename else None
+                video=video_field.file.read(UPLOAD_LIMIT+1) if video_field is not None and video_field.filename else None
+                if video is not None:
+                    if len(video)>UPLOAD_LIMIT: return self.send_json(413,{'error':'Video exceeds 250 MB limit'})
+                    video, upload_name = prepare_replay(video,video_field.filename)
+                else:
+                    upload_name = ''
                 with connect(db_path) as db:
                     mid=add_match(db,uploads,outcome=field('outcome') or 'unknown',
                                   opponent=field('opponent'),deck=field('deck'),notes=field('notes'),
-                                  video=video,filename=video_field.filename if video is not None else '')
+                                  video=video,filename=upload_name)
                 return self.send_json(201,{'id':mid})
             except (ValueError,TypeError) as exc:
                 return self.send_json(400,{'error':str(exc)})
