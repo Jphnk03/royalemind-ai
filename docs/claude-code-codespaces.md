@@ -16,7 +16,7 @@ gh repo clone Jphnk03/leadpilot-ai /workspaces/leadpilot-ai
 gh repo clone Jphnk03/royalemind-ai /workspaces/royalemind-ai
 ```
 
-Run a clone only for repositories not already present. If access fails, grant that Codespace access to the *specific* repository through GitHub's supported Codespaces permissions, or use the repository's own approved Codespace. Do not display or copy tokens. An existing Codespace may need authorization for additional private repositories; configuration in GitHub files does not grant that permission.
+Run a clone only for repositories not already present. If access fails, do not create a new Codespace or share credentials. GitHub documents using a repository-scoped **fine-grained personal access token**, kept privately in a Codespaces secret, for extra repositories in an **existing** Codespace. GitHub devcontainer repository permissions apply to **new Codespaces only**, not existing ones even after rebuild. Prefer minimal Contents permissions; ask the owner to authorize them privately. Do not print or paste tokens into chat. The existing Codespace may instead be kept to its original repository.
 
 Choose the correct project folder before asking Claude to modify anything. Do not let one project's settings, environment variables or credentials bleed into another. Opening the same repository from another folder does not deploy it.
 
