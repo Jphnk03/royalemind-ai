@@ -1,6 +1,7 @@
 """Opt-in video replay analysis using sampled frames and OpenAI Responses API.
 
-Requires ffmpeg on PATH and OPENAI_API_KEY in the server environment.
+Requires explicit ROYALEMIND_REPLAY_AI_ENABLED=true approval, ffmpeg on PATH
+and OPENAI_API_KEY in the server environment. A key alone never enables calls.
 Frames are transmitted to OpenAI only after the user explicitly requests analysis.
 """
 import base64
@@ -51,6 +52,8 @@ def sample_frames(video_path, count=8):
     return result
 
 def analyze_video(video_path, api_key=None, model=None):
+    if os.environ.get('ROYALEMIND_REPLAY_AI_ENABLED') != 'true':
+        raise RuntimeError('Paid replay analysis is disabled. Owner approval is required before enabling it.')
     api_key = api_key or os.environ.get('OPENAI_API_KEY')
     if not api_key:
         raise RuntimeError('OPENAI_API_KEY is not configured')

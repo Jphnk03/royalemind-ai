@@ -14,6 +14,15 @@ LIMIT = 100*1024*1024 + 65536
 
 def handler(db_path, uploads):
     class Handler(BaseHTTPRequestHandler):
+        def local_request(self, write=False):
+            # This is still a localhost prototype, not authenticated hosting.
+            # Reject DNS-rebinding hosts and cross-origin form submissions.
+            port = self.server.server_address[1]
+            host = self.headers.get('Host', '')
+            if host not in (f'127.0.0.1:{port}', f'localhost:{port}'):
+                return False
+            return not write or (self.headers.get('Origin') == 'http://' + host
+                and self.headers.get('Sec-Fetch-Site', 'same-origin') in ('same-origin', 'none'))
         def send_bytes(self, status, body, mime='application/json'):
             self.send_response(status)
             self.send_header('Content-Type',mime)
@@ -26,6 +35,8 @@ def handler(db_path, uploads):
         def send_json(self, status, value):
             self.send_bytes(status,json.dumps(value).encode())
         def do_GET(self):
+            if not self.local_request():
+                return self.send_json(403, {'error': 'Open this local app using its localhost address.'})
             path=urlsplit(self.path).path
             assets={'/':('index.html','text/html; charset=utf-8'),
                     '/style.css':('style.css','text/css; charset=utf-8'),
@@ -47,7 +58,11 @@ def handler(db_path, uploads):
                         return self.send_bytes(200,file.read_bytes(),mime)
             return self.send_json(404,{'error':'Not found'})
         def do_POST(self):
+            if not self.local_request(write=True):
+                return self.send_json(403, {'error': 'Use the local app to submit changes.'})
             if urlsplit(self.path).path.startswith('/api/analyze/'):
+                if os.environ.get('ROYALEMIND_REPLAY_AI_ENABLED') != 'true':
+                    return self.send_json(503, {'error': 'Paid replay analysis is disabled; owner approval is required.'})
                 mid=urlsplit(self.path).path.rsplit('/',1)[-1]
                 with connect(db_path) as db:
                     row=db.execute('SELECT video_file FROM matches WHERE id=?',(mid,)).fetchone()
