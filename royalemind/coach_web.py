@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from .coach import add_match, connect, history, progress
 from .challenge import challenge_summary, analyze_decision
-from .replay_ai import analyze_video
+from .replay_ai import analyze_video, replay_ai_enabled
 
 STATIC = Path(__file__).resolve().parent.parent/'coach_static'
 VIDEO_LIMIT = 100*1024*1024
@@ -86,6 +86,8 @@ def handler(db_path, uploads):
             if path in assets:
                 name,mime=assets[path]
                 return self.send_bytes(200,(STATIC/name).read_bytes(),mime)
+            if path == '/api/capabilities':
+                return self.send_json(200, {'replayAI': replay_ai_enabled()})
             if path in ('/api/matches','/api/progress','/api/challenge'):
                 with connect(db_path) as db:
                     return self.send_json(200,history(db) if path.endswith('matches') else challenge_summary(history(db)) if path.endswith('challenge') else progress(db))
@@ -101,7 +103,11 @@ def handler(db_path, uploads):
             return self.send_json(404,{'error':'Not found'})
         def do_POST(self):
             if not self.authenticate(): return
+            if self.headers.get('X-Requested-With') != 'royalemind-coach':
+                return self.send_json(403, {'error':'Open the coach and submit the form there'})
             if urlsplit(self.path).path.startswith('/api/analyze/'):
+                if not replay_ai_enabled():
+                    return self.send_json(503, {'error':'Replay AI is disabled'})
                 mid=urlsplit(self.path).path.rsplit('/',1)[-1]
                 with connect(db_path) as db:
                     row=db.execute('SELECT video_file FROM matches WHERE id=?',(mid,)).fetchone()
@@ -137,6 +143,8 @@ def handler(db_path, uploads):
                     item=form[name] if name in form else None
                     return item.value if item is not None and not isinstance(item,list) and item.filename is None else ''
                 video_field=form['video'] if 'video' in form else None
+                if isinstance(video_field,list):
+                    return self.send_json(400,{'error':'Choose one replay video'})
                 video=video_field.file.read(UPLOAD_LIMIT+1) if video_field is not None and video_field.filename else None
                 if video is not None:
                     if len(video)>UPLOAD_LIMIT: return self.send_json(413,{'error':'Video exceeds 250 MB limit'})
