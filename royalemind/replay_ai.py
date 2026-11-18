@@ -50,7 +50,13 @@ def sample_frames(video_path, count=8):
         raise RuntimeError('No replay frames could be extracted')
     return result
 
+def replay_ai_enabled():
+    return os.environ.get('ROYALEMIND_REPLAY_AI_ENABLED') == 'true'
+
+
 def analyze_video(video_path, api_key=None, model=None):
+    if not replay_ai_enabled():
+        raise RuntimeError('Replay AI is disabled')
     api_key = api_key or os.environ.get('OPENAI_API_KEY')
     if not api_key:
         raise RuntimeError('OPENAI_API_KEY is not configured')
